@@ -3,20 +3,19 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JS Craft - Stylish House & Fullscreen Fix</title>
+    <title>JS Craft - Fixed Trees & Perfect Controls</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #87ceeb; touch-action: none; }
-        /* キャンバスを画面いっぱいに広げる */
         canvas { display: block; width: 100%; height: 100%; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; color: white; font-size: 24px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; font-family: sans-serif; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; color: white; font-size: 24px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; }
         #mobile-controls { display: none; }
-        #joystick-wrapper { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; z-index: 20; border: 2px solid rgba(255,255,255,0.3); }
+        #joystick-wrapper { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; z-index: 30; border: 2px solid rgba(255,255,255,0.3); }
         #joystick-stick { position: absolute; top: 30px; left: 30px; width: 40px; height: 40px; background: rgba(255,255,255,0.5); border-radius: 50%; pointer-events: none; }
-        .mobile-btn { position: absolute; width: 70px; height: 70px; background: rgba(255,255,255,0.3); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; z-index: 20; user-select: none; border: 1px solid rgba(255,255,255,0.4); }
+        .mobile-btn { position: absolute; width: 70px; height: 70px; background: rgba(255,255,255,0.3); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; z-index: 30; user-select: none; border: 1px solid rgba(255,255,255,0.4); }
         #jump-btn { bottom: 40px; right: 40px; }
         #action-mode-btn { bottom: 130px; right: 40px; border-radius: 10px; font-size: 12px; text-align: center; }
-        #ui { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px; border-radius: 10px; color: white; display: flex; gap: 8px; z-index: 10; font-family: sans-serif; }
-        .slot { border: 2px solid #555; padding: 5px 12px; font-size: 14px; cursor: pointer; white-space: nowrap; transition: 0.1s; }
+        #ui { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 8px; border-radius: 10px; color: white; display: flex; gap: 8px; z-index: 30; font-family: sans-serif; }
+        .slot { border: 2px solid #555; padding: 5px 12px; font-size: 14px; cursor: pointer; transition: 0.1s; }
         .selected { border-color: #fff; background: rgba(255,255,255,0.3); transform: scale(1.1) translateY(-5px); }
     </style>
 </head>
@@ -56,15 +55,13 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         document.body.appendChild(renderer.domElement);
 
-        // --- リサイズ対応 (アスペクト比修正) ---
         window.addEventListener('resize', () => {
-            const width = window.innerWidth;
-            const height = window.innerHeight;
-            renderer.setSize(width, height);
-            camera.aspect = width / height;
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
         });
 
+        // テクスチャ生成
         function createTex(c1, c2, pattern = 'noise') {
             const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
             const ctx = canvas.getContext('2d');
@@ -98,28 +95,38 @@
             scene.add(mesh); blocks.push(mesh); blockMap.set(`${ix},${iy},${iz}`, mesh);
         }
 
-        // --- 改良版ハウス生成 ---
+        // --- 木の生成 (修正版) ---
+        function spawnTree(x, y, z) {
+            const treeH = 4 + Math.floor(Math.random() * 2);
+            for(let i=0; i<treeH; i++) addBlock(x, y+i, z, 3); // 幹
+            // 葉っぱをこんもりさせる
+            for(let ly=-2; ly<=2; ly++) {
+                for(let lx=-2; lx<=2; lx++) {
+                    for(let lz=-2; lz<=2; lz++) {
+                        const dist = Math.sqrt(lx*lx + (ly*1.5)*(ly*1.5) + lz*lz);
+                        if(dist < 2.5) addBlock(x+lx, y+treeH+ly, z+lz, 6);
+                    }
+                }
+            }
+        }
+
+        // --- 家の生成 (統合版) ---
         function spawnHouse(rx, rz) {
             let rh = Math.floor(simplex.noise2D(rx*0.05, rz*0.05)*5);
             const w=5, h=4, d=5;
-            for(let lx=0; lx<w; lx++) {
-                for(let lz=0; lz<d; lz++) {
-                    addBlock(rx+lx, rh, rz+lz, 4); // 床
-                    for(let ly=1; ly<=h; ly++) {
-                        const isCorner = (lx===0 || lx===w-1) && (lz===0 || lz===d-1);
-                        const isWall = lx===0 || lx===w-1 || lz===0 || lz===d-1;
-                        if(isCorner) {
-                            addBlock(rx+lx, rh+ly, rz+lz, 3); // 四隅は原木（柱）
-                        } else if(isWall) {
-                            const isDoor = (ly < 3 && lx === 2 && lz === 0);
-                            const isWindow = (ly === 2 && (lx === 0 || lx === w-1 || lz === d-1));
-                            if(isDoor) continue;
-                            if(isWindow) addBlock(rx+lx, rh+ly, rz+lz, 5); // ガラス
-                            else addBlock(rx+lx, rh+ly, rz+lz, 4); // 壁は板材
-                        }
+            for(let lx=0; lx<w; lx++) for(let lz=0; lz<d; lz++) {
+                addBlock(rx+lx, rh, rz+lz, 4);
+                for(let ly=1; ly<=h; ly++) {
+                    const isCorner = (lx===0 || lx===w-1) && (lz===0 || lz===d-1);
+                    const isWall = lx===0 || lx===w-1 || lz===0 || lz===d-1;
+                    if(isCorner) addBlock(rx+lx, rh+ly, rz+lz, 3); // 柱
+                    else if(isWall) {
+                        if(ly < 3 && lx === 2 && lz === 0) continue; // ドア穴
+                        if(ly === 2 && (lx === 0 || lx === w-1 || lz === d-1)) addBlock(rx+lx, rh+ly, rz+lz, 5); // 窓
+                        else addBlock(rx+lx, rh+ly, rz+lz, 4); // 壁
                     }
-                    addBlock(rx+lx, rh+h+1, rz+lz, 6); // 屋根
                 }
+                addBlock(rx+lx, rh+h+1, rz+lz, 6); // 屋根
             }
         }
 
@@ -129,16 +136,12 @@
             for(let z = -WORLD_SIZE; z < WORLD_SIZE; z++) {
                 let h = Math.floor(simplex.noise2D(x * 0.05, z * 0.05) * 5);
                 for(let d=0; d<8; d++) addBlock(x, h-d, z, d===0 ? 1 : 2);
-                if(Math.random() < 0.015 && h >= 0) {
-                    const treeH = 4 + Math.floor(Math.random()*2);
-                    for(let i=0; i<treeH; i++) addBlock(x, h+1+i, z, 3);
-                    for(let lx=-2; lx<=2; lx++) for(let lz=-2; lz<=2; lz++) for(let ly=0; ly<=1; ly++) 
-                        if(Math.abs(lx)+Math.abs(lz) < 3) addBlock(x+lx, h+1+treeH+ly, z+lz, 6);
-                }
+                if(Math.random() < 0.015 && h >= 0) spawnTree(x, h+1, z);
             }
         }
-        spawnHouse(8, 8); spawnHouse(-12, -12);
+        spawnHouse(12, 12); spawnHouse(-18, -18);
 
+        // --- 制御ロジック ---
         const controls = new PointerLockControls(camera, document.body);
         let moveState = { f: 0, r: 0 }, velocity = new THREE.Vector3(), canJump = false;
         let selectedBlock = 1, actionMode = 'break';
@@ -160,47 +163,30 @@
             }
         }
 
-        // PC操作
-        window.addEventListener('wheel', (e) => {
-            let next = selectedBlock + (e.deltaY > 0 ? 1 : -1);
-            if(next < 1) next = 6; if(next > 6) next = 1;
-            updateUI(next);
-        }, { passive: true });
-
-        document.addEventListener('mousedown', (e) => {
-            if(!isMobile && !controls.isLocked) controls.lock();
-            else if(!isMobile) handleAction(e.button===0?'break':'place');
-        });
-        document.addEventListener('contextmenu', e => e.preventDefault());
-        document.addEventListener('keydown', (e) => {
-            if(e.code==='KeyW') moveState.f=1; if(e.code==='KeyS') moveState.f=-1;
-            if(e.code==='KeyA') moveState.r=-1; if(e.code==='KeyD') moveState.r=1;
-            if(e.code==='Space'&&canJump){ velocity.y=8; canJump=false; }
-            if(e.key >= 1 && e.key <= 6) updateUI(parseInt(e.key));
-        });
-        document.addEventListener('keyup', (e) => { if(['KeyW','KeyS'].includes(e.code)) moveState.f=0; if(['KeyA','KeyD'].includes(e.code)) moveState.r=0; });
-
-        // スマホマルチタッチ
+        // スマホ誤作動防止タッチ管理
         let joyTouchId = null, lookTouchId = null, lastLookX = 0, lastLookY = 0, tapStart = 0;
         window.addEventListener('touchstart', (e) => {
             for(let t of e.changedTouches) {
+                if(t.target.closest('#jump-btn') || t.target.closest('#action-mode-btn') || t.target.closest('#ui')) return;
                 const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
-                const isJoyZone = t.clientX < rect.right + 30 && t.clientY > rect.top - 30;
-                if(isJoyZone && joyTouchId === null) joyTouchId = t.identifier;
-                else if(lookTouchId === null) { lookTouchId = t.identifier; lastLookX = t.clientX; lastLookY = t.clientY; tapStart = Date.now(); }
+                if(t.clientX < rect.right + 30 && t.clientY > rect.top - 30) {
+                    if(joyTouchId === null) joyTouchId = t.identifier;
+                } else if(lookTouchId === null) {
+                    lookTouchId = t.identifier; lastLookX = t.clientX; lastLookY = t.clientY; tapStart = Date.now();
+                }
             }
         });
         window.addEventListener('touchmove', (e) => {
             for(let t of e.changedTouches) {
                 if(t.identifier === joyTouchId) {
                     const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
-                    const dx = t.clientX - (rect.left + 50), dy = t.clientY - (rect.top + 50);
+                    const dx = t.clientX - (rect.left+50), dy = t.clientY - (rect.top+50);
                     const dist = Math.min(Math.sqrt(dx*dx+dy*dy), 40), ang = Math.atan2(dy, dx);
                     document.getElementById('joystick-stick').style.transform = `translate(${Math.cos(ang)*dist}px, ${Math.sin(ang)*dist}px)`;
                     moveState.f = -Math.sin(ang)*(dist/40); moveState.r = Math.cos(ang)*(dist/40);
                 } else if(t.identifier === lookTouchId) {
-                    camera.rotation.y -= (t.clientX - lastLookX) * 0.005;
-                    camera.rotation.x -= (t.clientY - lastLookY) * 0.005;
+                    camera.rotation.y -= (t.clientX - lastLookX) * 0.006;
+                    camera.rotation.x -= (t.clientY - lastLookY) * 0.006;
                     camera.rotation.x = Math.max(-1.5, Math.min(1.5, camera.rotation.x));
                     lastLookX = t.clientX; lastLookY = t.clientY;
                 }
@@ -213,12 +199,27 @@
             }
         });
 
-        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); if(canJump){ velocity.y=8; canJump=false; } });
-        document.getElementById('action-mode-btn').addEventListener('touchstart', (e) => { e.preventDefault(); actionMode = (actionMode==='break'?'place':'break'); e.target.innerHTML = `モード:<br>${actionMode==='break'?'破壊':'設置'}`; });
+        // PC操作
+        window.addEventListener('wheel', (e) => {
+            let next = selectedBlock + (e.deltaY > 0 ? 1 : -1);
+            if(next < 1) next = 6; if(next > 6) next = 1;
+            updateUI(next);
+        }, { passive: true });
+        document.addEventListener('mousedown', (e) => { if(!isMobile && !controls.isLocked) controls.lock(); else if(!isMobile) handleAction(e.button===0?'break':'place'); });
+        document.addEventListener('keydown', (e) => {
+            if(e.code==='KeyW') moveState.f=1; if(e.code==='KeyS') moveState.f=-1;
+            if(e.code==='KeyA') moveState.r=-1; if(e.code==='KeyD') moveState.r=1;
+            if(e.code==='Space'&&canJump){ velocity.y=8; canJump=false; }
+            if(e.key >= 1 && e.key <= 6) updateUI(parseInt(e.key));
+        });
+        document.addEventListener('keyup', (e) => { if(['KeyW','KeyS'].includes(e.code)) moveState.f=0; if(['KeyA','KeyD'].includes(e.code)) moveState.r=0; });
 
+        // UIイベント
+        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); if(canJump){ velocity.y=8; canJump=false; } });
+        document.getElementById('action-mode-btn').addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); actionMode = (actionMode==='break'?'place':'break'); e.target.innerHTML = `モード:<br>${actionMode==='break'?'破壊':'設置'}`; });
         window.updateUI = (n) => { selectedBlock = n; document.querySelectorAll('.slot').forEach((el, i) => el.classList.toggle('selected', i === n-1)); };
 
-        camera.position.set(0, 12, 0);
+        camera.position.set(0, 10, 0);
         let lastT = performance.now();
         const isColliding = (x, y, z) => blockMap.has(`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`);
 
@@ -232,10 +233,8 @@
             moveVec.addScaledVector(forward, moveState.f * 8 * delta);
             moveVec.addScaledVector(right, -moveState.r * 8 * delta);
             
-            const nX = camera.position.x + moveVec.x;
-            if (!isColliding(nX + (moveVec.x > 0 ? 0.3 : -0.3), camera.position.y - 1.5, camera.position.z)) camera.position.x = nX;
-            const nZ = camera.position.z + moveVec.z;
-            if (!isColliding(camera.position.x, camera.position.y - 1.5, nZ + (moveVec.z > 0 ? 0.3 : -0.3))) camera.position.z = nZ;
+            if (!isColliding(camera.position.x + moveVec.x + (moveVec.x>0?0.3:-0.3), camera.position.y - 1.5, camera.position.z)) camera.position.x += moveVec.x;
+            if (!isColliding(camera.position.x, camera.position.y - 1.5, camera.position.z + moveVec.z + (moveVec.z>0?0.3:-0.3))) camera.position.z += moveVec.z;
 
             velocity.y -= 24.0 * delta; camera.position.y += velocity.y * delta;
             const py = Math.floor(camera.position.y - 1.6);
@@ -243,7 +242,7 @@
             if(camera.position.y < -30) camera.position.set(0, 15, 0);
             renderer.render(scene, camera);
         }
-        animate();
+            animate();
     </script>
 </body>
 </html>
