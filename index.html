@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JS Craft - Random World Update</title>
+    <title>JS Craft - Perfect Touch Controls</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #87ceeb; touch-action: none; }
         canvas { display: block; width: 100vw; height: 100vh; }
@@ -55,6 +55,7 @@
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.body.appendChild(renderer.domElement);
 
+        // --- テクスチャ定義 ---
         function createTex(c1, c2, pattern = 'noise') {
             const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
             const ctx = canvas.getContext('2d');
@@ -115,33 +116,23 @@
             }
         }
 
-        // --- 地形と木の生成 ---
+        // --- 地形生成 ---
         const simplex = new SimplexNoise();
         const WORLD_SIZE = 45;
         for(let x = -WORLD_SIZE; x < WORLD_SIZE; x++) {
             for(let z = -WORLD_SIZE; z < WORLD_SIZE; z++) {
                 let h = Math.floor(simplex.noise2D(x * 0.05, z * 0.05) * 5);
                 for(let d=0; d<15; d++) addBlock(x, h-d, z, d===0 ? 1 : 2);
-                // 木の生成
                 if(Math.random() < 0.03 && h >= 0) spawnTree(x, h+1, z);
             }
         }
-
-        // --- 家をランダムな位置に2軒生成 ---
-        let placedHouses = 0;
-        let attempts = 0;
-        while(placedHouses < 2 && attempts < 100) {
-            let rx = Math.floor((Math.random() - 0.5) * (WORLD_SIZE * 1.5));
-            let rz = Math.floor((Math.random() - 0.5) * (WORLD_SIZE * 1.5));
-            let rh = Math.floor(simplex.noise2D(rx * 0.05, rz * 0.05) * 5);
-            if(rh >= 0) {
-                spawnHouse(rx, rh + 1, rz);
-                placedHouses++;
-            }
-            attempts++;
+        let placedH = 0;
+        while(placedH < 2) {
+            let rx = Math.floor((Math.random()-0.5)*60), rz = Math.floor((Math.random()-0.5)*60);
+            let rh = Math.floor(simplex.noise2D(rx*0.05, rz*0.05)*5);
+            if(rh >= 0) { spawnHouse(rx, rh+1, rz); placedH++; }
         }
 
-        // 操作系
         const controls = new PointerLockControls(camera, document.body);
         let moveState = { f: 0, r: 0 }, velocity = new THREE.Vector3(), canJump = false;
         let selectedBlock = 1, actionMode = 'break';
@@ -163,19 +154,13 @@
             }
         }
 
-        // イベント登録 (PC)
+        // --- PC & スマホ共通入力管理 ---
         document.addEventListener('mousedown', (e) => {
             if(!isMobile && !controls.isLocked) { controls.lock(); return; }
             if(!isMobile && e.button === 0) handleAction('break');
             if(!isMobile && e.button === 2) handleAction('place');
         });
         document.addEventListener('contextmenu', e => e.preventDefault());
-        document.addEventListener('wheel', (e) => {
-            if(isMobile) return;
-            let next = selectedBlock + (e.deltaY > 0 ? 1 : -1);
-            if(next < 1) next = 6; if(next > 6) next = 1;
-            updateUI(next);
-        });
         document.addEventListener('keydown', (e) => {
             if(e.code==='KeyW') moveState.f=1; if(e.code==='KeyS') moveState.f=-1;
             if(e.code==='KeyA') moveState.r=-1; if(e.code==='KeyD') moveState.r=1;
@@ -187,41 +172,69 @@
             if(['KeyA','KeyD'].includes(e.code)) moveState.r=0;
         });
 
-        // スマホ移動
-        const joyStick = document.getElementById('joystick-stick');
-        const joyWrapper = document.getElementById('joystick-wrapper');
+        // --- スマホ専用マルチタッチ管理 ---
         let joyTouchId = null;
-        joyWrapper.addEventListener('touchstart', (e) => { e.preventDefault(); joyTouchId = e.targetTouches[0].identifier; }, {passive: false});
+        let lookTouchId = null;
+        let lastLookX = 0, lastLookY = 0;
+        let tapStartTime = 0;
+
+        window.addEventListener('touchstart', (e) => {
+            for(let i=0; i<e.changedTouches.length; i++){
+                const t = e.changedTouches[i];
+                const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
+                const isJoyZone = t.clientX < rect.right + 20 && t.clientY > rect.top - 20;
+
+                if(isJoyZone && joyTouchId === null) {
+                    joyTouchId = t.identifier;
+                } else if(lookTouchId === null && t.clientX > window.innerWidth / 3) {
+                    lookTouchId = t.identifier;
+                    lastLookX = t.clientX;
+                    lastLookY = t.clientY;
+                    tapStartTime = Date.now();
+                }
+            }
+        }, {passive: false});
+
         window.addEventListener('touchmove', (e) => {
             for(let i=0; i<e.changedTouches.length; i++){
                 const t = e.changedTouches[i];
                 if(t.identifier === joyTouchId) {
-                    const rect = joyWrapper.getBoundingClientRect();
-                    const dx = t.clientX - (rect.left + rect.width / 2), dy = t.clientY - (rect.top + rect.height / 2);
+                    const rect = document.getElementById('joystick-wrapper').getBoundingClientRect();
+                    const centerX = rect.left + rect.width/2, centerY = rect.top + rect.height/2;
+                    const dx = t.clientX - centerX, dy = t.clientY - centerY;
                     const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40), angle = Math.atan2(dy, dx);
-                    joyStick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+                    document.getElementById('joystick-stick').style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
                     moveState.f = -Math.sin(angle) * (dist/40); moveState.r = Math.cos(angle) * (dist/40);
+                } else if(t.identifier === lookTouchId) {
+                    const dx = t.clientX - lastLookX, dy = t.clientY - lastLookY;
+                    camera.rotation.y -= dx * 0.005;
+                    camera.rotation.x -= dy * 0.005;
+                    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                    lastLookX = t.clientX; lastLookY = t.clientY;
                 }
             }
         }, {passive: false});
+
         window.addEventListener('touchend', (e) => {
-            for(let i=0; i<e.changedTouches.length; i++) if(e.changedTouches[i].identifier === joyTouchId) {
-                joyTouchId = null; joyStick.style.transform = `translate(0,0)`; moveState.f = 0; moveState.r = 0;
+            for(let i=0; i<e.changedTouches.length; i++){
+                const t = e.changedTouches[i];
+                if(t.identifier === joyTouchId) {
+                    joyTouchId = null;
+                    document.getElementById('joystick-stick').style.transform = `translate(0,0)`;
+                    moveState.f = 0; moveState.r = 0;
+                } else if(t.identifier === lookTouchId) {
+                    // タップ（短い時間かつ移動が少ない）ならアクション実行
+                    const duration = Date.now() - tapStartTime;
+                    if(duration < 200) handleAction(actionMode);
+                    lookTouchId = null;
+                }
             }
         });
 
-        // スマホアクション
-        let touchStartX = 0;
-        renderer.domElement.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; });
-        renderer.domElement.addEventListener('touchend', (e) => {
-            const touchEndX = e.changedTouches[0].clientX;
-            if(touchEndX > window.innerWidth / 2 && Math.abs(touchEndX - touchStartX) < 10) handleAction(actionMode);
-        });
-
-        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); if(canJump) { velocity.y=8; canJump=false; } });
+        document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); if(canJump){ velocity.y=8; canJump=false; } });
         document.getElementById('action-mode-btn').addEventListener('touchstart', (e) => {
             e.preventDefault(); actionMode = (actionMode === 'break') ? 'place' : 'break';
-            e.target.innerHTML = `モード:<br>${actionMode === 'break' ? '破壊' : '設置'}`;
+            e.target.innerHTML = `モード:<br>${actionMode==='break'?'破壊':'設置'}`;
         });
 
         window.updateUI = (n) => {
@@ -259,7 +272,7 @@
             if(camera.position.y < -30) camera.position.set(0, 20, 0);
             renderer.render(scene, camera);
         }
-            animate();
+        animate();
     </script>
 </body>
 </html>
