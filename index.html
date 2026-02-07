@@ -1,0 +1,233 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>JS Craft - Fixed Terrain</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; color: white; font-size: 20px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; }
+        
+        /* 操作用UI */
+        #joystick-wrapper { position: absolute; bottom: 40px; left: 40px; width: 100px; height: 100px; background: rgba(255,255,255,0.2); border-radius: 50%; z-index: 20; touch-action: none; }
+        #joystick-stick { position: absolute; top: 30px; left: 30px; width: 40px; height: 40px; background: rgba(255,255,255,0.5); border-radius: 50%; }
+        .mobile-btn { position: absolute; width: 70px; height: 70px; background: rgba(255,255,255,0.2); border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; z-index: 20; user-select: none; }
+        #jump-btn { bottom: 40px; right: 40px; }
+        #action-mode-btn { bottom: 130px; right: 40px; border-radius: 10px; font-size: 12px; text-align: center; }
+
+        #ui { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); padding: 5px 10px; border-radius: 10px; color: white; display: flex; gap: 5px; z-index: 10; max-width: 90vw; overflow-x: auto; }
+        .slot { border: 2px solid #555; padding: 5px 10px; font-size: 12px; }
+        .selected { border-color: #fff; background: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body>
+    <div id="crosshair">+</div>
+    <div id="joystick-wrapper"><div id="joystick-stick"></div></div>
+    <div id="jump-btn" class="mobile-btn">JUMP</div>
+    <div id="action-mode-btn" class="mobile-btn">モード:<br>破壊</div>
+    <div id="ui">
+        <div id="slot1" class="slot selected" onclick="updateUI(1)">草</div>
+        <div id="slot2" class="slot" onclick="updateUI(2)">土</div>
+        <div id="slot3" class="slot" onclick="updateUI(3)">石</div>
+        <div id="slot4" class="slot" onclick="updateUI(4)">木</div>
+        <div id="slot5" class="slot" onclick="updateUI(5)">葉</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.136.0';
+        import { PointerLockControls } from 'https://cdn.skypack.dev/three@0.136.0/examples/jsm/controls/PointerLockControls.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 重くならないよう上限設定
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const light = new THREE.AmbientLight(0xffffff, 0.9);
+        scene.add(light);
+
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const materials = {
+            1: new THREE.MeshStandardMaterial({ color: 0x55aa55 }), 
+            2: new THREE.MeshStandardMaterial({ color: 0x8b4513 }), 
+            3: new THREE.MeshStandardMaterial({ color: 0x808080 }), 
+            4: new THREE.MeshStandardMaterial({ color: 0x5d4037 }), 
+            5: new THREE.MeshStandardMaterial({ color: 0x2e7d32 })
+        };
+        const blocks = [];
+        let selectedBlock = 1;
+        let actionMode = 'break';
+
+        function addBlock(x, y, z, type) {
+            const mesh = new THREE.Mesh(geometry, materials[type]);
+            mesh.position.set(Math.floor(x) + 0.5, Math.floor(y) + 0.5, Math.floor(z) + 0.5);
+            const edges = new THREE.EdgesGeometry(geometry);
+            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.1, transparent: true }));
+            line.raycast = function() {}; 
+            mesh.add(line);
+            blocks.push(mesh);
+            scene.add(mesh);
+        }
+
+        // --- 🏔️ 修正版：地層生成ロジック ---
+        const simplex = new SimplexNoise();
+        const range = 20; 
+        for(let x = -range; x < range; x++) {
+            for(let z = -range; z < range; z++) {
+                let h = Math.floor(simplex.noise2D(x * 0.1, z * 0.1) * 3);
+                
+                // 地表（草）
+                addBlock(x, h, z, 1);
+                
+                // 地下（土と石で埋める）
+                for(let y = h - 1; y >= h - 3; y--) {
+                    addBlock(x, y, z, (y < h - 2) ? 3 : 2); // 深いと石(3)、浅いと土(2)
+                }
+
+                // 木の自動生成
+                if (Math.random() < 0.02 && h >= 0) {
+                    for(let i=1; i<=3; i++) addBlock(x, h+i, z, 4);
+                    for(let lx=-1; lx<=1; lx++) for(let lz=-1; lz<=1; lz++) addBlock(x+lx, h+4, z+lz, 5);
+                }
+            }
+        }
+
+        const controls = new PointerLockControls(camera, document.body);
+        let moveState = { f: 0, r: 0 };
+        let canJump = false;
+        let velocity = new THREE.Vector3();
+
+        // ジョイスティック
+        const joystickWrapper = document.getElementById('joystick-wrapper');
+        const joystickStick = document.getElementById('joystick-stick');
+        joystickWrapper.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = joystickWrapper.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const touch = e.touches[0];
+            let dx = touch.clientX - centerX;
+            let dy = touch.clientY - centerY;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const maxDist = 35;
+            if (dist > maxDist) { dx *= maxDist/dist; dy *= maxDist/dist; }
+            joystickStick.style.transform = `translate(${dx}px, ${dy}px)`;
+            moveState.r = dx / maxDist; moveState.f = -dy / maxDist;
+        }, {passive: false});
+        joystickWrapper.addEventListener('touchend', () => {
+            joystickStick.style.transform = `translate(0px, 0px)`;
+            moveState.f = 0; moveState.r = 0;
+        });
+
+        // ボタン類
+        document.getElementById('jump-btn').addEventListener('touchstart', (e) => {
+            e.preventDefault(); if(canJump) { velocity.y = 8; canJump = false; }
+        });
+        document.getElementById('action-mode-btn').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            actionMode = actionMode === 'break' ? 'place' : 'break';
+            e.target.innerHTML = `モード:<br>${actionMode === 'break' ? '破壊' : '設置'}`;
+        });
+
+        // 視点移動
+        let touchStartX, touchStartY;
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY;
+        });
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            if(!touchStartX || e.touches.length > 1) return;
+            const dx = e.touches[0].clientX - touchStartX;
+            const dy = e.touches[0].clientY - touchStartY;
+            camera.rotation.y -= dx * 0.005;
+            camera.rotation.x -= dy * 0.005;
+            camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            touchStartX = e.touches[0].clientX; touchStartY = e.touches[0].clientY;
+        });
+
+        // アクション（破壊・設置）
+        function handleAction() {
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+            const intersects = raycaster.intersectObjects(blocks, false);
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                if (actionMode === 'break') {
+                    scene.remove(intersect.object);
+                    blocks.splice(blocks.indexOf(intersect.object), 1);
+                } else {
+                    const pos = new THREE.Vector3().copy(intersect.object.position).add(intersect.face.normal);
+                    addBlock(pos.x-0.5, pos.y-0.5, pos.z-0.5, selectedBlock);
+                }
+            }
+        }
+        let lastTap = 0;
+        renderer.domElement.addEventListener('touchend', (e) => {
+            const now = Date.now();
+            if (now - lastTap < 300) handleAction();
+            lastTap = now;
+        });
+
+        // PC操作
+        document.addEventListener('keydown', (e) => {
+            if(e.code === 'KeyW') moveState.f = 1; if(e.code === 'KeyS') moveState.f = -1;
+            if(e.code === 'KeyA') moveState.r = -1; if(e.code === 'KeyD') moveState.r = 1;
+            if(e.code === 'Space' && canJump) { velocity.y = 8; canJump = false; }
+        });
+        document.addEventListener('keyup', (e) => {
+            if(['KeyW','KeyS'].includes(e.code)) moveState.f = 0;
+            if(['KeyA','KeyD'].includes(e.code)) moveState.r = 0;
+        });
+        document.addEventListener('mousedown', (e) => {
+            if (!controls.isLocked) { controls.lock(); return; }
+            if (e.button === 0) { actionMode = 'break'; handleAction(); }
+            if (e.button === 2) { actionMode = 'place'; handleAction(); }
+        });
+
+        window.updateUI = function(n) {
+            selectedBlock = n;
+            document.querySelectorAll('.slot').forEach((el, i) => el.classList.toggle('selected', i === n-1));
+        }
+
+        camera.position.set(0, 10, 0);
+        let lastTime = performance.now();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = performance.now();
+            const delta = Math.min((time - lastTime) / 1000, 0.1);
+            velocity.y -= 25.0 * delta;
+            
+            // 移動
+            const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
+            const side = new THREE.Vector3().crossVectors(camera.up, dir).normalize();
+            camera.position.addScaledVector(dir, moveState.f * 7 * delta);
+            camera.position.addScaledVector(side, -moveState.r * 7 * delta);
+
+            // 接地判定
+            const footLevel = camera.position.y - 1.6;
+            const standingOn = blocks.find(b => 
+                Math.floor(b.position.x) === Math.floor(camera.position.x) &&
+                Math.floor(b.position.z) === Math.floor(camera.position.z) &&
+                Math.floor(b.position.y) === Math.floor(footLevel)
+            );
+            if (standingOn && velocity.y < 0) {
+                velocity.y = 0; camera.position.y = Math.floor(standingOn.position.y) + 2.6; canJump = true;
+            }
+            camera.position.y += velocity.y * delta;
+            if (camera.position.y < -30) { camera.position.set(0, 15, 0); velocity.y = 0; }
+            lastTime = time;
+            renderer.render(scene, camera);
+        }
+        animate();
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
