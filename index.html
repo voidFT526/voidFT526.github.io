@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>JS Craft - Wide World</title>
+    <title>JS Craft - Single Player Edition</title>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #87ceeb; touch-action: none; }
         canvas { display: block; width: 100%; height: 100%; }
@@ -44,8 +44,6 @@
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x87ceeb);
-        
-        // フォグ（霧）を追加して遠くを自然に
         scene.fog = new THREE.Fog(0x87ceeb, 20, 50);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -74,11 +72,11 @@
         }
 
         const materials = {
-            1: new THREE.MeshStandardMaterial({ map: createCraftTexture('#5da04f', '#4d8a41') }), // 草
-            2: new THREE.MeshStandardMaterial({ map: createCraftTexture('#8b4513', '#6d350d') }), // 土
-            3: new THREE.MeshStandardMaterial({ map: createCraftTexture('#808080', '#606060') }), // 石
-            4: new THREE.MeshStandardMaterial({ map: createCraftTexture('#5d4037', '#3e2723') }), // 木
-            5: new THREE.MeshStandardMaterial({ map: createCraftTexture('#2e7d32', '#1b5e20'), transparent: true, opacity: 0.8 }) // 葉
+            1: new THREE.MeshStandardMaterial({ map: createCraftTexture('#5da04f', '#4d8a41') }),
+            2: new THREE.MeshStandardMaterial({ map: createCraftTexture('#8b4513', '#6d350d') }),
+            3: new THREE.MeshStandardMaterial({ map: createCraftTexture('#808080', '#606060') }),
+            4: new THREE.MeshStandardMaterial({ map: createCraftTexture('#5d4037', '#3e2723') }),
+            5: new THREE.MeshStandardMaterial({ map: createCraftTexture('#2e7d32', '#1b5e20'), transparent: true, opacity: 0.8 })
         };
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -93,7 +91,6 @@
         function addBlock(x, y, z, type) {
             const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
             if(blockMap.has(`${ix},${iy},${iz}`)) return;
-
             const mesh = new THREE.Mesh(geometry, materials[type]);
             mesh.position.set(ix + 0.5, iy + 0.5, iz + 0.5);
             scene.add(mesh);
@@ -101,45 +98,34 @@
             blockMap.set(`${ix},${iy},${iz}`, mesh);
         }
 
-        // --- ワールド生成（より広く、木を多く） ---
+        // --- ワールド生成 ---
         const simplex = new SimplexNoise();
-        const WORLD_SIZE = 25; // 範囲を拡大
+        const WORLD_SIZE = 20;
+        const GROUND_DEPTH = 15;
         for(let x = -WORLD_SIZE; x < WORLD_SIZE; x++) {
             for(let z = -WORLD_SIZE; z < WORLD_SIZE; z++) {
                 let h = Math.floor(simplex.noise2D(x * 0.1, z * 0.1) * 4);
-                
-                // 地面
-                addBlock(x, h, z, 1);
-                addBlock(x, h-1, z, 2);
-                addBlock(x, h-2, z, 3);
-
-                // 木の生成（出現率アップ）
-                if (Math.random() < 0.04 && h >= 0) {
+                for(let d=0; d<GROUND_DEPTH; d++) {
+                    let type = (d === 0) ? 1 : (d < 4) ? 2 : 3;
+                    addBlock(x, h - d, z, type);
+                }
+                if (Math.random() < 0.03 && h >= 0) {
                     const treeH = 3 + Math.floor(Math.random() * 2);
-                    for(let i=1; i<=treeH; i++) addBlock(x, h+i, z, 4); // 幹
-                    // 葉っぱ
-                    for(let lx=-1; lx<=1; lx++) {
-                        for(let ly=0; ly<=1; ly++) {
-                            for(let lz=-1; lz<=1; lz++) {
-                                addBlock(x+lx, h+treeH+ly+1, z+lz, 5);
-                            }
-                        }
-                    }
+                    for(let i=1; i<=treeH; i++) addBlock(x, h+i, z, 4);
+                    for(let lx=-1; lx<=1; lx++) for(let ly=0; ly<=1; ly++) for(let lz=-1; lz<=1; lz++) addBlock(x+lx, h+treeH+ly+1, z+lz, 5);
                 }
             }
         }
 
-        // --- 操作系ロジック ---
+        // --- 操作系 ---
         const controls = new PointerLockControls(camera, document.body);
         let moveState = { f: 0, r: 0 }, velocity = new THREE.Vector3(), canJump = false;
-        let lon = 0, lat = 0, lookTouchId = null, lastTouchX = 0, lastTouchY = 0;
         let selectedBlock = 1, actionMode = 'break';
 
         function handleAction() {
             const raycaster = new THREE.Raycaster();
             raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
             const intersects = raycaster.intersectObjects(blocks);
-
             if (intersects.length > 0) {
                 const intersect = intersects[0];
                 if (actionMode === 'break') {
@@ -154,118 +140,92 @@
             }
         }
 
-        // スマホ視点（高感度 0.45）
-        renderer.domElement.addEventListener('touchstart', (e) => {
-            for(let t of e.changedTouches) {
-                if (t.clientX > 150 && lookTouchId === null) {
-                    lookTouchId = t.identifier; lastTouchX = t.clientX; lastTouchY = t.clientY;
-                }
-            }
+        document.addEventListener('mousedown', (e) => {
+            if(!controls.isLocked) { controls.lock(); return; }
+            if(e.button === 0) { actionMode='break'; handleAction(); }
+            if(e.button === 2) { actionMode='place'; handleAction(); }
         });
-        renderer.domElement.addEventListener('touchmove', (e) => {
-            for(let t of e.changedTouches) {
-                if (t.identifier === lookTouchId) {
-                    lon -= (t.clientX - lastTouchX) * 0.45;
-                    lat -= (t.clientY - lastTouchY) * 0.45;
-                    lat = Math.max(-89, Math.min(89, lat));
-                    const phi = THREE.MathUtils.degToRad(90 - lat);
-                    const theta = THREE.MathUtils.degToRad(lon);
-                    camera.lookAt(camera.position.clone().add(new THREE.Vector3().setFromSphericalCoords(1, phi, theta)));
-                    lastTouchX = t.clientX; lastTouchY = t.clientY;
-                }
-            }
+        document.addEventListener('keydown', (e) => {
+            if(e.code==='KeyW') moveState.f=1; if(e.code==='KeyS') moveState.f=-1;
+            if(e.code==='KeyA') moveState.r=-1; if(e.code==='KeyD') moveState.r=1;
+            if(e.code==='Space'&&canJump){ velocity.y=8; canJump=false; }
         });
-        renderer.domElement.addEventListener('touchend', (e) => {
-            for(let t of e.changedTouches) if (t.identifier === lookTouchId) lookTouchId = null;
+        document.addEventListener('keyup', (e) => {
+            if(['KeyW','KeyS'].includes(e.code)) moveState.f=0;
+            if(['KeyA','KeyD'].includes(e.code)) moveState.r=0;
         });
-
-        // イベント設定
-        if(isMobile) {
-            const stick = document.getElementById('joystick-stick');
-            document.getElementById('joystick-wrapper').addEventListener('touchmove', (e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const t = Array.from(e.touches).find(touch => touch.clientX < 150);
-                if(!t) return;
-                const dx = t.clientX - (rect.left + 50), dy = t.clientY - (rect.top + 50);
-                const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40), angle = Math.atan2(dy, dx);
-                stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
-                moveState.r = (Math.cos(angle)*dist)/40; moveState.f = -(Math.sin(angle)*dist)/40;
-            });
-            document.getElementById('joystick-wrapper').addEventListener('touchend', () => {
-                stick.style.transform = `translate(0,0)`; moveState.f = 0; moveState.r = 0;
-            });
-            document.getElementById('jump-btn').addEventListener('touchstart', (e) => { e.preventDefault(); if(canJump) { velocity.y = 8; canJump = false; } });
-            document.getElementById('action-mode-btn').addEventListener('touchstart', (e) => {
-                e.preventDefault(); actionMode = (actionMode === 'break' ? 'place' : 'break');
-                e.target.innerHTML = `モード:<br>${actionMode === 'break' ? '破壊' : '設置'}`;
-            });
-            let lastTap = 0;
-            renderer.domElement.addEventListener('touchend', (e) => {
-                if (e.changedTouches[0].clientX > 150) {
-                    const now = Date.now();
-                    if(now - lastTap < 300) handleAction();
-                    lastTap = now;
-                }
-            });
-        } else {
-            document.addEventListener('mousedown', (e) => {
-                if(!controls.isLocked) { controls.lock(); return; }
-                if(e.button === 0) { actionMode='break'; handleAction(); }
-                if(e.button === 2) { actionMode='place'; handleAction(); }
-            });
-            document.addEventListener('keydown', (e) => {
-                if(e.code==='KeyW') moveState.f=1; if(e.code==='KeyS') moveState.f=-1;
-                if(e.code==='KeyA') moveState.r=-1; if(e.code==='KeyD') moveState.r=1;
-                if(e.code==='Space'&&canJump){ velocity.y=8; canJump=false; }
-            });
-            document.addEventListener('keyup', (e) => {
-                if(['KeyW','KeyS'].includes(e.code)) moveState.f=0;
-                if(['KeyA','KeyD'].includes(e.code)) moveState.r=0;
-            });
-            document.addEventListener('wheel', (e) => {
-                selectedBlock = e.deltaY > 0 ? (selectedBlock % 5) + 1 : (selectedBlock - 2 + 5) % 5 + 1;
-                updateUI(selectedBlock);
-            });
-        }
+        document.addEventListener('wheel', (e) => {
+            selectedBlock = e.deltaY > 0 ? (selectedBlock % 5) + 1 : (selectedBlock - 2 + 5) % 5 + 1;
+            updateUI(selectedBlock);
+        });
 
         window.updateUI = function(n) {
             selectedBlock = n;
             document.querySelectorAll('.slot').forEach((el, i) => el.classList.toggle('selected', i === n-1));
         }
 
-        // リサイズ対応（解像度に合わせてアスペクト比を修正）
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        camera.position.set(0, 8, 0);
+        camera.position.set(0, 15, 0);
         let lastTime = performance.now();
+
+        function isColliding(x, y, z) {
+            return blockMap.has(`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`);
+        }
 
         function animate() {
             requestAnimationFrame(animate);
-            const time = performance.now(), delta = Math.min((time - lastTime) / 1000, 0.1);
-            camera.rotation.z = 0;
-            velocity.y -= 22.0 * delta;
+            const time = performance.now();
+            const delta = Math.min((time - lastTime) / 1000, 0.1);
+            lastTime = time;
 
+            // --- プレイヤー物理 (横方向) ---
             const forward = new THREE.Vector3(); camera.getWorldDirection(forward); forward.y = 0; forward.normalize();
             const right = new THREE.Vector3().crossVectors(camera.up, forward).normalize();
-            camera.position.addScaledVector(forward, moveState.f * 7 * delta);
-            camera.position.addScaledVector(right, -moveState.r * 7 * delta);
+            
+            const moveVec = new THREE.Vector3();
+            moveVec.addScaledVector(forward, moveState.f * 7 * delta);
+            moveVec.addScaledVector(right, -moveState.r * 7 * delta);
 
-            const px = Math.floor(camera.position.x), pz = Math.floor(camera.position.z), py = Math.floor(camera.position.y - 1.6);
+            const nextX = camera.position.x + moveVec.x;
+            const bufferX = moveVec.x > 0 ? 0.3 : -0.3;
+            if (!isColliding(nextX + bufferX, camera.position.y - 0.5, camera.position.z) && 
+                !isColliding(nextX + bufferX, camera.position.y - 1.5, camera.position.z)) {
+                camera.position.x = nextX;
+            }
+
+            const nextZ = camera.position.z + moveVec.z;
+            const bufferZ = moveVec.z > 0 ? 0.3 : -0.3;
+            if (!isColliding(camera.position.x, camera.position.y - 0.5, nextZ + bufferZ) && 
+                !isColliding(camera.position.x, camera.position.y - 1.5, nextZ + bufferZ)) {
+                camera.position.z = nextZ;
+            }
+
+            // --- プレイヤー物理 (垂直方向) ---
+            velocity.y -= 22.0 * delta;
+            camera.position.y += velocity.y * delta;
+
+            const px = Math.floor(camera.position.x), pz = Math.floor(camera.position.z);
+            const py = Math.floor(camera.position.y - 1.6);
             const ground = blockMap.get(`${px},${py},${pz}`);
-            if (ground && velocity.y < 0) {
-                velocity.y = 0; camera.position.y = py + 1 + 1.6; canJump = true;
+
+            if (ground && velocity.y <= 0) {
+                const groundTop = py + 1 + 1.6;
+                if (camera.position.y <= groundTop) {
+                    velocity.y = 0;
+                    camera.position.y = groundTop;
+                    canJump = true;
+                }
             } else {
                 canJump = false;
             }
 
-            camera.position.y += velocity.y * delta;
-            if (camera.position.y < -30) camera.position.set(0, 15, 0);
+            if (camera.position.y < -50) camera.position.set(0, 15, 0);
 
-            lastTime = time;
             renderer.render(scene, camera);
         }
         animate();
